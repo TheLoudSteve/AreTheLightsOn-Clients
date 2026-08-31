@@ -1,0 +1,12 @@
+services:
+  monitor:
+    image: ghcr.io/theloudsteve/arethelightson-client-docker:latest
+    restart: unless-stopped
+    env_file: ${ATLO_ENV_FILE:-.env}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
