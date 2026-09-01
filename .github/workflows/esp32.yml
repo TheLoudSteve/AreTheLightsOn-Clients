@@ -32,6 +32,8 @@ jobs:
           cp esp32/.pio/build/atom-lite/firmware.bin pages/esp32/firmware/
           cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin pages/esp32/firmware/
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with: { path: pages }
       - id: deployment
