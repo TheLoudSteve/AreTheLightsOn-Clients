@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <mbedtls/base64.h>
+#include <sys/time.h>
 #include <time.h>
 
 #ifndef ATLO_VERSION
@@ -45,7 +46,8 @@ rqXRfboQnoZsG4q5WTP468SQvvG5
 
 void status(uint32_t color) { led.setPixelColor(0, color); led.show(); }
 void secureClient(WiFiClientSecure& client) { client.setCACert(AMAZON_ROOT_CA_1); }
-bool ensureTime() { if (time(nullptr) > 1700000000) return true; configTime(0, 0, "time.aws.com", "pool.ntp.org"); for (int attempt = 0; attempt < 20 && time(nullptr) <= 1700000000; attempt++) delay(250); const bool ready = time(nullptr) > 1700000000; if (!ready) Serial.println("ATLO_CLOCK_NOT_SET"); return ready; }
+bool hasValidTime() { return time(nullptr) > 1700000000; }
+bool setTime(time_t epoch) { if (epoch <= 1700000000) return false; timeval value; value.tv_sec = epoch; value.tv_usec = 0; settimeofday(&value, nullptr); prefs.putULong("last_time", static_cast<uint32_t>(epoch)); return hasValidTime(); }
 
 String decode64(const String& text) {
   size_t outputLength = 0;
@@ -63,10 +65,34 @@ String jsonValue(const String& json, const String& key) {
   return end < 0 ? "" : json.substring(valueStart, end);
 }
 
+time_t jsonEpoch(const String& json) {
+  const String marker = "\"unix_time\":"; const int start = json.indexOf(marker);
+  if (start < 0) return 0; return static_cast<time_t>(json.substring(start + marker.length()).toInt());
+}
+
+bool bootstrapTime(const String& endpoint) {
+  const int apiPath = endpoint.indexOf("/v1/"); if (apiPath < 0) { Serial.println("ATLO_TIME_ERROR endpoint"); return false; }
+  WiFiClientSecure client; client.setInsecure(); HTTPClient http;
+  if (!http.begin(client, endpoint.substring(0, apiPath) + "/v1/time")) { Serial.println("ATLO_TIME_ERROR begin"); return false; }
+  const int code = http.GET(); const String response = http.getString(); http.end(); Serial.printf("ATLO_TIME_HTTP %d\n", code);
+  if (code != 200 || !setTime(jsonEpoch(response))) { Serial.println("ATLO_TIME_ERROR response"); return false; }
+  Serial.println("ATLO_TIME_BOOTSTRAPPED"); return true;
+}
+
+bool ensureTime(const String& endpoint) {
+  if (hasValidTime()) return true;
+  configTime(0, 0, "time.aws.com", "pool.ntp.org");
+  for (int attempt = 0; attempt < 20 && !hasValidTime(); attempt++) delay(250);
+  if (hasValidTime()) { prefs.putULong("last_time", static_cast<uint32_t>(time(nullptr))); Serial.println("ATLO_TIME_NTP"); return true; }
+  if (bootstrapTime(endpoint)) return true;
+  if (setTime(static_cast<time_t>(prefs.getULong("last_time", 0)))) { Serial.println("ATLO_TIME_CACHED"); return true; }
+  Serial.println("ATLO_CLOCK_NOT_SET"); return false;
+}
+
 bool claimDevice() {
   const String claimUrl = prefs.getString("claim_url"); const String deviceId = prefs.getString("device_id"); const String claim = prefs.getString("claim");
   if (claimUrl.isEmpty() || deviceId.isEmpty() || claim.isEmpty()) { Serial.println("ATLO_CLAIM_ERROR missing_setup"); return false; }
-  if (!ensureTime()) return false; WiFiClientSecure client; secureClient(client);
+  if (!ensureTime(claimUrl)) return false; WiFiClientSecure client; secureClient(client);
   HTTPClient http; if (!http.begin(client, claimUrl)) { Serial.println("ATLO_CLAIM_ERROR begin"); return false; }
   http.addHeader("Content-Type", "application/json"); const int code = http.POST("{\"device_id\":\"" + deviceId + "\",\"claim_code\":\"" + claim + "\"}");
   const String response = http.getString(); http.end(); Serial.printf("ATLO_CLAIM_HTTP %d\n", code); if (code != 200) return false;
@@ -78,7 +104,7 @@ bool claimDevice() {
 bool heartbeat() {
   const String url = prefs.getString("heartbeat_url"); const String secret = prefs.getString("secret"); const String deviceId = prefs.getString("device_id");
   if (url.isEmpty() || secret.isEmpty() || deviceId.isEmpty()) return false;
-  if (!ensureTime()) return false; WiFiClientSecure client; secureClient(client); HTTPClient http; if (!http.begin(client, url)) { Serial.println("ATLO_HEARTBEAT_ERROR begin"); return false; }
+  if (!ensureTime(url)) return false; WiFiClientSecure client; secureClient(client); HTTPClient http; if (!http.begin(client, url)) { Serial.println("ATLO_HEARTBEAT_ERROR begin"); return false; }
   http.addHeader("Authorization", "Bearer " + secret); http.addHeader("Content-Type", "application/json");
   const String body = "{\"device_id\":\"" + deviceId + "\",\"uptime_seconds\":" + String((millis() - startedAt) / 1000) + ",\"wifi_rssi\":" + String(WiFi.RSSI()) + ",\"firmware_version\":\"esp32/atom-lite-" ATLO_VERSION "\"}";
   const int code = http.POST(body); http.end(); Serial.printf("ATLO_HEARTBEAT_HTTP %d\n", code); return code >= 200 && code < 300;
