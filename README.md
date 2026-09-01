@@ -5,7 +5,7 @@ Open-source monitor clients for [Are The Lights On](https://arethelightson.com),
 | Client | Status | Purpose |
 | --- | --- | --- |
 | [Docker](docker/) | Available | Run an outbound-only monitor on utility-powered hardware. |
-| ESP32 | Planned | A small dedicated utility-power monitor. |
+| [ESP32 / Atom Lite](esp32/) | Available | Flash and configure a small dedicated utility-power monitor from your browser. |
 
 Every client sends a private, authenticated heartbeat to the service. Contributors' device locations and identities are never publicly exposed; public maps show only coarse coverage areas.
 
