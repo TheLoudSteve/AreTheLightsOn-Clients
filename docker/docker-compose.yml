@@ -1,0 +1,5 @@
+services:
+  monitor:
+    image: ghcr.io/theloudsteve/arethelightson-client-docker:latest
+    restart: unless-stopped
+    env_file: .env

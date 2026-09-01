@@ -9,7 +9,7 @@ This is only a valid outage monitor when the host itself loses power when utilit
 ## Install
 
 1. In [Are The Lights On](https://arethelightson.com/contribute), select **Docker container**, choose the physical location of the host, and complete the utility-power attestation.
-2. Copy the generated configuration into a new `.env` file next to `compose.yaml`. Treat it like a password; it contains the device secret.
+2. Copy the generated configuration into a new `.env` file next to `docker-compose.yml`. Treat it like a password; it contains the device secret.
 3. Start the monitor:
 
    ```sh
