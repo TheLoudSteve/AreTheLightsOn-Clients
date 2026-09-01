@@ -18,6 +18,7 @@ Adafruit_NeoPixel led(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 Preferences prefs;
 unsigned long startedAt;
 unsigned long lastHeartbeat;
+bool wifiConnectedAnnounced;
 
 const char AMAZON_ROOT_CA_1[] PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
@@ -44,7 +45,7 @@ rqXRfboQnoZsG4q5WTP468SQvvG5
 
 void status(uint32_t color) { led.setPixelColor(0, color); led.show(); }
 void secureClient(WiFiClientSecure& client) { client.setCACert(AMAZON_ROOT_CA_1); }
-void ensureTime() { if (time(nullptr) > 1700000000) return; configTime(0, 0, "time.aws.com", "pool.ntp.org"); for (int attempt = 0; attempt < 20 && time(nullptr) <= 1700000000; attempt++) delay(250); }
+bool ensureTime() { if (time(nullptr) > 1700000000) return true; configTime(0, 0, "time.aws.com", "pool.ntp.org"); for (int attempt = 0; attempt < 20 && time(nullptr) <= 1700000000; attempt++) delay(250); const bool ready = time(nullptr) > 1700000000; if (!ready) Serial.println("ATLO_CLOCK_NOT_SET"); return ready; }
 
 String decode64(const String& text) {
   size_t outputLength = 0;
@@ -64,23 +65,23 @@ String jsonValue(const String& json, const String& key) {
 
 bool claimDevice() {
   const String claimUrl = prefs.getString("claim_url"); const String deviceId = prefs.getString("device_id"); const String claim = prefs.getString("claim");
-  if (claimUrl.isEmpty() || deviceId.isEmpty() || claim.isEmpty()) return false;
-  ensureTime(); WiFiClientSecure client; secureClient(client);
-  HTTPClient http; if (!http.begin(client, claimUrl)) return false;
+  if (claimUrl.isEmpty() || deviceId.isEmpty() || claim.isEmpty()) { Serial.println("ATLO_CLAIM_ERROR missing_setup"); return false; }
+  if (!ensureTime()) return false; WiFiClientSecure client; secureClient(client);
+  HTTPClient http; if (!http.begin(client, claimUrl)) { Serial.println("ATLO_CLAIM_ERROR begin"); return false; }
   http.addHeader("Content-Type", "application/json"); const int code = http.POST("{\"device_id\":\"" + deviceId + "\",\"claim_code\":\"" + claim + "\"}");
-  const String response = http.getString(); http.end(); if (code != 200) return false;
+  const String response = http.getString(); http.end(); Serial.printf("ATLO_CLAIM_HTTP %d\n", code); if (code != 200) return false;
   const String secret = jsonValue(response, "secret"); const String heartbeatUrl = jsonValue(response, "heartbeat_url");
-  if (secret.isEmpty() || heartbeatUrl.isEmpty()) return false;
-  prefs.putString("secret", secret); prefs.putString("heartbeat_url", heartbeatUrl); prefs.remove("claim"); prefs.remove("claim_url"); return true;
+  if (secret.isEmpty() || heartbeatUrl.isEmpty()) { Serial.println("ATLO_CLAIM_ERROR response"); return false; }
+  prefs.putString("secret", secret); prefs.putString("heartbeat_url", heartbeatUrl); prefs.remove("claim"); prefs.remove("claim_url"); Serial.println("ATLO_CLAIMED"); return true;
 }
 
 bool heartbeat() {
   const String url = prefs.getString("heartbeat_url"); const String secret = prefs.getString("secret"); const String deviceId = prefs.getString("device_id");
   if (url.isEmpty() || secret.isEmpty() || deviceId.isEmpty()) return false;
-  ensureTime(); WiFiClientSecure client; secureClient(client); HTTPClient http; if (!http.begin(client, url)) return false;
+  if (!ensureTime()) return false; WiFiClientSecure client; secureClient(client); HTTPClient http; if (!http.begin(client, url)) { Serial.println("ATLO_HEARTBEAT_ERROR begin"); return false; }
   http.addHeader("Authorization", "Bearer " + secret); http.addHeader("Content-Type", "application/json");
   const String body = "{\"device_id\":\"" + deviceId + "\",\"uptime_seconds\":" + String((millis() - startedAt) / 1000) + ",\"wifi_rssi\":" + String(WiFi.RSSI()) + ",\"firmware_version\":\"esp32/atom-lite-" ATLO_VERSION "\"}";
-  const int code = http.POST(body); http.end(); return code >= 200 && code < 300;
+  const int code = http.POST(body); http.end(); Serial.printf("ATLO_HEARTBEAT_HTTP %d\n", code); return code >= 200 && code < 300;
 }
 
 void configureFromSerial() {
@@ -90,19 +91,20 @@ void configureFromSerial() {
   for (int index = 0; index < 5; index++) { const int separator = line.indexOf('|', position); fields[index] = line.substring(position, separator < 0 ? line.length() : separator); position = separator < 0 ? line.length() : separator + 1; }
   const String claimUrl = decode64(fields[0]); const String deviceId = decode64(fields[1]); const String claim = decode64(fields[2]); const String ssid = decode64(fields[3]); const String password = decode64(fields[4]);
   if (claimUrl.isEmpty() || deviceId.isEmpty() || claim.isEmpty() || ssid.isEmpty()) { Serial.println("ATLO_ERROR invalid configuration"); status(led.Color(255, 0, 0)); return; }
-  prefs.putString("claim_url", claimUrl); prefs.putString("device_id", deviceId); prefs.putString("claim", claim); prefs.putString("ssid", ssid); prefs.putString("password", password); Serial.println("ATLO_CONFIGURED"); ESP.restart();
+  prefs.putString("claim_url", claimUrl); prefs.putString("device_id", deviceId); prefs.putString("claim", claim); prefs.putString("ssid", ssid); prefs.putString("password", password); Serial.println("ATLO_CONFIGURED"); delay(100); ESP.restart();
 }
 
 void setup() {
-  led.begin(); status(led.Color(0, 0, 255)); pinMode(BUTTON_PIN, INPUT); Serial.begin(115200); Serial.setTimeout(1000); prefs.begin("atlo", false); startedAt = millis();
+  led.begin(); status(led.Color(0, 0, 255)); pinMode(BUTTON_PIN, INPUT); Serial.begin(115200); Serial.setTimeout(1000); prefs.begin("atlo", false); startedAt = millis(); Serial.println("ATLO_BOOT");
   const String ssid = prefs.getString("ssid"); if (ssid.isEmpty()) { Serial.println("ATLO_READY"); return; }
-  status(led.Color(255, 160, 0)); WiFi.mode(WIFI_STA); WiFi.begin(ssid.c_str(), prefs.getString("password").c_str());
+  status(led.Color(255, 160, 0)); Serial.println("ATLO_WIFI_CONNECTING"); WiFi.mode(WIFI_STA); WiFi.begin(ssid.c_str(), prefs.getString("password").c_str());
 }
 
 void loop() {
   configureFromSerial();
   if (prefs.getString("ssid").isEmpty()) return;
   if (WiFi.status() != WL_CONNECTED) { status(led.Color(255, 160, 0)); return; }
+  if (!wifiConnectedAnnounced) { wifiConnectedAnnounced = true; Serial.println("ATLO_WIFI_CONNECTED"); }
   if (prefs.getString("secret").isEmpty() && !claimDevice()) { status(led.Color(255, 0, 0)); delay(5000); return; }
   if (millis() - lastHeartbeat >= HEARTBEAT_INTERVAL_MS || lastHeartbeat == 0) { lastHeartbeat = millis(); if (heartbeat()) status(led.Color(0, 255, 0)); else status(led.Color(255, 0, 0)); }
 }
