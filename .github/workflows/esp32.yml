@@ -1,0 +1,38 @@
+name: ESP32 client
+
+on:
+  pull_request:
+    paths: [esp32/**, .github/workflows/esp32.yml]
+  push:
+    branches: [main]
+    paths: [esp32/**, .github/workflows/esp32.yml]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-publish-installer:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - run: pip install platformio
+      - run: pio run -d esp32
+      - run: |
+          mkdir -p pages/esp32/firmware
+          cp -R esp32/installer/. pages/esp32/
+          cp esp32/.pio/build/atom-lite/bootloader.bin pages/esp32/firmware/
+          cp esp32/.pio/build/atom-lite/partitions.bin pages/esp32/firmware/
+          cp esp32/.pio/build/atom-lite/firmware.bin pages/esp32/firmware/
+          cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin pages/esp32/firmware/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: pages }
+      - id: deployment
+        uses: actions/deploy-pages@v4
