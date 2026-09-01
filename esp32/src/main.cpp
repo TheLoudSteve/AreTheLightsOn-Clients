@@ -48,7 +48,9 @@ void ensureTime() { if (time(nullptr) > 1700000000) return; configTime(0, 0, "ti
 
 String decode64(const String& text) {
   size_t outputLength = 0;
-  if (mbedtls_base64_decode(nullptr, 0, &outputLength, reinterpret_cast<const unsigned char*>(text.c_str()), text.length()) != 0) return "";
+  const int sizeResult = mbedtls_base64_decode(nullptr, 0, &outputLength, reinterpret_cast<const unsigned char*>(text.c_str()), text.length());
+  if (sizeResult != 0 && sizeResult != MBEDTLS_ERR_BASE64_BUFFER_TOO_SMALL) return "";
+  if (outputLength == 0) return "";
   auto* output = new unsigned char[outputLength + 1];
   if (mbedtls_base64_decode(output, outputLength, &outputLength, reinterpret_cast<const unsigned char*>(text.c_str()), text.length()) != 0) { delete[] output; return ""; }
   output[outputLength] = 0; String result(reinterpret_cast<char*>(output)); delete[] output; return result;

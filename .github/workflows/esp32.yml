@@ -23,6 +23,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.13' }
       - run: pip install platformio
+      - run: python esp32/test/test_base64_size_query.py
       - run: pio run -d esp32
       - run: |
           mkdir -p pages/esp32/firmware
